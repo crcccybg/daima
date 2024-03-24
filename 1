@@ -1,0 +1,197 @@
+#include <Adafruit_NeoPixel.h>
+#include <Wire.h>
+#include <paj7620.h>
+
+#define NUM_STRIPS 8
+#define LEDS_PER_STRIP 60
+
+int stripPins[NUM_STRIPS] = {3, 4, 5, 6, 7, 8, 9, 10};
+
+Adafruit_NeoPixel strips[NUM_STRIPS];
+
+int meteorTrailLength = 5;
+int meteorDelayMs = 30;
+int blinkDelayMs = 100;
+int blinkDurationMs = 2000;
+
+bool isForward = true;  // Flag to indicate the direction of the meteor effect
+bool rightGestureDetected = false;
+
+int currentStrip = 2; // Starting strip for the right gesture effect
+unsigned long startTime;
+
+void setup()
+{
+  Serial.begin(9600);
+
+  paj7620Init();
+
+  for (int i = 0; i < NUM_STRIPS; i++)
+  {
+    strips[i] = Adafruit_NeoPixel(LEDS_PER_STRIP, stripPins[i], NEO_GRB + NEO_KHZ800);
+    strips[i].begin();
+    strips[i].show();
+  }
+
+  randomSeed(analogRead(A0)); // Initialize the random number generator
+}
+
+void loop()
+{
+  uint8_t data = 0;
+  paj7620ReadReg(0x43, 1, &data);
+
+  switch (data)
+  {
+    case GES_UP_FLAG:
+      Serial.println(F("向上"));
+      meteorTrailEffect(isForward, strips[0].Color(0, 255, 0)); // 亮起固定的绿色
+      break;
+    case GES_DOWN_FLAG:
+      Serial.println(F("向下"));
+      meteorTrailEffect(false, strips[0].Color(255, 0, 0)); // 亮起固定的红色
+      break;
+    case GES_LEFT_FLAG:
+      Serial.println(F("向左"));
+      blinkEffect();
+      break;
+    case GES_RIGHT_FLAG:
+      if (!rightGestureDetected)
+      {
+        Serial.println(F("向右"));
+
+        startTime = millis();
+        rightGestureDetected = true;
+      }
+      break;
+    default:
+      break;
+  }
+
+  if (rightGestureDetected)
+  {
+    rightGestureEffect();
+  }
+}
+
+void rightGestureEffect()
+{
+  unsigned long currentTime = millis();
+  if (currentTime - startTime <= 5000)
+  {
+    int numStripsToLight = (currentTime - startTime) / 625 + 1; // 计算需要点亮的灯带数目
+
+    for (int i = 0; i < numStripsToLight; i++)
+    {
+      int stripIndex = (currentStrip + i) % NUM_STRIPS;
+      strips[stripIndex].fill(strips[stripIndex].Color(255, 255, 255), 0, LEDS_PER_STRIP);
+      strips[stripIndex].show();
+    }
+
+    delay(625);
+    for (int i = 0; i < numStripsToLight; i++)
+    {
+      int stripIndex = (currentStrip + i) % NUM_STRIPS;
+      strips[stripIndex].fill(strips[stripIndex].Color(0, 0, 0), 0, LEDS_PER_STRIP);
+      strips[stripIndex].show();
+    }
+  }
+  else
+  {
+    rightGestureDetected = false;
+  }
+}
+
+void meteorTrailEffect(bool forward, uint32_t fixedColor)
+{
+  int startIndex, endIndex, direction;
+
+  if (forward)
+  {
+    startIndex = 0;
+    endIndex = LEDS_PER_STRIP + meteorTrailLength;
+    direction = 1;
+  }
+  else
+  {
+    startIndex = LEDS_PER_STRIP - 1;
+    endIndex = -meteorTrailLength - 1;
+    direction = -1;
+  }
+
+  int i = startIndex;
+  while (i != endIndex)
+  {
+    for (int j = 0; j < NUM_STRIPS; j++)
+    {
+      if ((i - meteorTrailLength * direction) >= 0 && (i - meteorTrailLength * direction) < LEDS_PER_STRIP)
+      {
+        strips[j].setPixelColor(i - meteorTrailLength * direction, strips[j].Color(0, 0, 0));
+      }
+      if (i >= 0 && i < LEDS_PER_STRIP)
+      {
+        strips[j].setPixelColor(i, fixedColor); // 使用固定颜色
+      }
+    }
+    for (int j = 0; j < NUM_STRIPS; j++)
+    {
+      strips[j].show();
+    }
+    delay(meteorDelayMs);
+    i += direction;
+  }
+}
+
+void blinkEffect()
+{
+  unsigned long startTime = millis();
+
+  while (millis() - startTime < blinkDurationMs)
+  {
+    for (int i = 0; i < NUM_STRIPS; i++)
+    {
+      uint32_t color1 = generateRandomColor();
+      uint32_t color2 = generateRandomColor();
+
+      for (int j = 0; j < LEDS_PER_STRIP; j += 2)
+      {
+        strips[i].setPixelColor(j, color1);
+        strips[i].setPixelColor(j + 1, color2);
+      }
+      strips[i].show();
+    }
+
+    delay(blinkDelayMs);
+
+    for (int i = 0; i < NUM_STRIPS; i++)
+    {
+      for (int j = 0; j < LEDS_PER_STRIP; j++)
+      {
+        strips[i].setPixelColor(j, strips[i].Color(0, 0, 0));
+      }
+      strips[i].show();
+    }
+
+    delay(blinkDelayMs);
+  }
+}
+
+uint32_t generateRandomColor()
+{
+  uint8_t red = random(256);
+  uint8_t green = random(256);
+  uint8_t blue = random(256);
+  return strips[0].Color(red, green, blue);
+}
+
+void turnOffLEDStrips()
+{
+  for (int i = 0; i < NUM_STRIPS; i++)
+  {
+    for (int j = 0; j < LEDS_PER_STRIP; j++)
+    {
+      strips[i].setPixelColor(j, strips[i].Color(0, 0, 0));
+    }
+    strips[i].show();
+  }
+}
